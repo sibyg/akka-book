@@ -1,4 +1,4 @@
-package com.example.c_315
+package com.example
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.pattern.{ask, pipe}
@@ -7,6 +7,28 @@ import akka.util.Timeout
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration._
+
+object Application315 extends App {
+  val system = ActorSystem("315")
+  val actorA = system.actorOf(ActorA.props(), "actorA")
+  val actorB = system.actorOf(ActorB.props(), "actorB")
+  val actorC = system.actorOf(ActorC.props(), "actorC")
+  val actorD = system.actorOf(ActorD.props(), "actorD")
+
+  // implicit timeout
+  implicit val timeout = Timeout(5 seconds)
+
+  private val f: Future[Result] = for {
+    x <- ask(actorA, Request).mapTo[Int]
+    y <- ask(actorB, Request).mapTo[String]
+    z <- ask(actorC, Request).mapTo[Double]
+  } yield Result(x, y, z)
+
+  f pipeTo actorD
+
+  // thereafter terminate the ActorSystem -
+  system.awaitTermination()
+}
 
 class ActorA extends Actor with ActorLogging {
 
@@ -55,7 +77,8 @@ object ActorC {
 
 class ActorD extends Actor with ActorLogging {
   def receive = {
-    case r: Result => log.info("Result=" + r)
+    case r: Result =>
+      log.info("Result=" + r)
   }
 }
 
@@ -66,25 +89,3 @@ object ActorD {
 object Request {}
 
 case class Result(x: Int, s: String, d: Double)
-
-object ApplicationMain315 extends App {
-  val system = ActorSystem("315")
-  val actorA = system.actorOf(ActorA.props(), "actorA")
-  val actorB = system.actorOf(ActorB.props(), "actorB")
-  val actorC = system.actorOf(ActorC.props(), "actorC")
-  val actorD = system.actorOf(ActorD.props(), "actorD")
-
-  // implicit timeout
-  implicit val timeout = Timeout(5 seconds)
-
-  private val f: Future[Result] = for {
-    x <- ask(actorA, Request).mapTo[Int]
-    y <- ask(actorB, Request).mapTo[String]
-    z <- ask(actorC, Request).mapTo[Double]
-  } yield Result(x, y, z)
-
-  f pipeTo actorD
-
-  // thereafter terminate the ActorSystem -
-  system.awaitTermination()
-}
