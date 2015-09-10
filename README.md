@@ -1,4 +1,4 @@
-activator-akka-scala-seed
+AkkaScala pdf examples - 2.3.12
 =========================
 
-A minimal seed template for an Akka with Scala build 
+All examples tried here in AkkaScala pdf
