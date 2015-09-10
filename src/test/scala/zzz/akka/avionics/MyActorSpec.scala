@@ -19,10 +19,11 @@ class MyActorSpec extends TestKitSpec(ActorSystem("MyActorSpec")) with BeforeAnd
   override def afterAll() { system.shutdown() }
 
 
-  override protected def afterEach(): Unit =
+//  TODO sibyg fixit
+//  override protected def afterEach(): Unit =
   // Await on the result, giving timeouts for the gracefulStop
   // as well as the timeout on the Future that's running
-    Await.result(gracefulStop(system.actorOf(Props[MyActor]), 5.seconds)(system), 6.seconds);
+//    Await.result(gracefulStop(system.actorOf(Props[MyActor]), 5.seconds)(system), 6.seconds);
 
   def makeActor(): ActorRef = system.actorOf(Props[MyActor], "MyActor")
   "My Actor" should {
