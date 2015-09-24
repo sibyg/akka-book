@@ -4,6 +4,7 @@ import akka.actor.SupervisorStrategy._
 import akka.actor._
 import akka.event.LoggingReceive
 import akka.util.Timeout
+import com.example.CounterService.{Reconnect, GetCurrentCount, Increment, ServiceUnavailable}
 import com.example.Storage.StorageException
 import com.typesafe.config.ConfigFactory
 
@@ -116,19 +117,48 @@ class CounterService extends Actor {
     // We need the initial value to be able to operate
     storage.get ! Get(key)
   }
+
+  def forwardOrPlaceInBacklog(msg: Any): Unit = {
+    // We need the initial value from storage before we can start delegate to
+    // the counter. Before that we place the messages in a backlog, to be sent
+    // to the counter when it is initialized.
+    counter match {
+      case Some(c) => c forward msg
+      case None => if (backlog.size >= MaxBacklog) throw new ServiceUnavailable("CounterService is not available, lack of initial value")
+        backlog :+= (sender() -> msg)
+
+    }
+  }
+
+  def receive = LoggingReceive {
+    case Entry(k, v) if k == key && counter == None =>
+      val c = context.actorOf(Props(classOf[Counter], k, v))
+      counter = Some(c)
+
+      // tell counter to use current storage
+      c ! UseStorage(storage)
+
+      // send the buffered backlog to the counter
+      for ((replyTo, msg) <- backlog) c.tell(msg, sender = replyTo)
+      backlog = IndexedSeq.empty
+
+
+    case msg@Increment(n) => forwardOrPlaceInBacklog(msg)
+    case msg@GetCurrentCount => forwardOrPlaceInBacklog(msg)
+    case Terminated(actorRef) if Some(actorRef) == Storage =>
+      // After 3 restarts the storage child is stopped.
+      // We receive Terminated because we watch the child, see initStorage.
+      storage = None
+      // Tell the counter that there is no storage for the moment
+      counter foreach(_ ! UseStorage(None))
+      context.system.scheduler.scheduleOnce(10 seconds, self, Reconnect)
+
+    case Reconnect =>
+      // Re-establish storage after the scheduled delay
+      initStorage()
+  }
 }
 
-object Storage {
-
-  case class Entry(key: String, value: Long)
-
-  case class Get(key: String)
-
-  case class Store(entry: Entry)
-
-  class StorageException(msg: String) extends RuntimeException(msg)
-
-}
 
 object Counter {
 
@@ -169,6 +199,18 @@ class Counter(key: String, initialValue: Long) extends Actor {
       _ ! Store(Entry(key, count))
     }
   }
+}
+
+object Storage {
+
+  case class Entry(key: String, value: Long)
+
+  case class Get(key: String)
+
+  case class Store(entry: Entry)
+
+  class StorageException(msg: String) extends RuntimeException(msg)
+
 }
 
 /**
