@@ -2,6 +2,7 @@ package com.example
 
 import akka.actor.SupervisorStrategy._
 import akka.actor._
+import akka.pattern.{ ask, pipe }
 import akka.event.LoggingReceive
 import akka.util.Timeout
 import com.example.CounterService.{Reconnect, GetCurrentCount, Increment, ServiceUnavailable}
@@ -56,15 +57,40 @@ object Worker {
 
 }
 
+/**
+ * Worker performs some work when it receives the `Start` message.
+ * It will continuously notify the sender of the `Start` message
+ * of current ``Progress``. The `Worker` supervise the `CounterService`.
+ */
 class Worker extends Actor with ActorLogging {
+  import Worker._
+  import CounterService._
   implicit val askTimeout = Timeout(5 seconds)
 
+  var progressListener : Option[ActorRef] = None
+  val counterService = context.actorOf(Props[CounterService], "counter")
+  val totalCount = 51
+  import context.dispatcher
 
   override def supervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
     case _: CounterService.ServiceUnavailable => Stop
   }
 
-  override def receive: Receive = ???
+  override def receive = LoggingReceive {
+    case Start if progressListener.isEmpty =>
+      progressListener = Some(sender)
+      context.system.scheduler.schedule(Duration.Zero, 1 second, self, Do)
+
+    case Do =>
+      counterService ! Increment 1
+      counterService ! Increment 1
+      counterService ! Increment 1
+
+      counterService ? GetCurrentCount map {
+        case CurrentCount(_, count) => Progress(100.0 * count / totalCount)
+      } pipeTo progressListener.get
+
+  }
 }
 
 object CounterService {
@@ -145,7 +171,7 @@ class CounterService extends Actor {
 
     case msg@Increment(n) => forwardOrPlaceInBacklog(msg)
     case msg@GetCurrentCount => forwardOrPlaceInBacklog(msg)
-    case Terminated(actorRef) if Some(actorRef) == Storage =>
+    case Terminated(actorRef) if Some(actorRef) == storage =>
       // After 3 restarts the storage child is stopped.
       // We receive Terminated because we watch the child, see initStorage.
       storage = None
@@ -226,7 +252,7 @@ class Storage extends Actor {
 
   override def receive: Actor.Receive = LoggingReceive {
     case Store(Entry(key, value)) => db.save(key, value)
-    case Get(key) => sender() != Entry(key, db.load(key).getOrElse(0L))
+    case Get(key) => sender() ! Entry(key, db.load(key).getOrElse(0L))
   }
 }
 
